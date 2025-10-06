@@ -23,19 +23,18 @@ for (const t of tools) {
     {
       title: t.name,
       description: t.description,
-      inputSchema: zodToJsonSchema(t.inputSchema as z.ZodTypeAny)
-      // (outputSchema optional)
+      inputSchema: t.inputSchema as z.ZodTypeAny   // <-- use Zod, not JSON Schema
     },
     async (args: any) => {
       const parsed = (t.inputSchema as z.ZodTypeAny).parse(args || {});
       const result = await t.handler(parsed);
-      // Return both human text and structured JSON
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         structuredContent: result
       };
     }
   );
+  
 }
 
 const app = express();
