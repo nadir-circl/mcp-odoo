@@ -2,7 +2,7 @@ import express, { type Request, type Response, type NextFunction } from "express
 import cors from "cors";
 import { CONFIG } from "./config.js";
 import { tools } from "./tools.js";
-import { SSEServer } from "@modelcontextprotocol/sdk/server/sse";
+import { SSEServer } from "@modelcontextprotocol/sdk/server/sse/index.js";
 import { z } from "zod";
 import zodToJsonSchema from "zod-to-json-schema";
 
