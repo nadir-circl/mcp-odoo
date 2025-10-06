@@ -3,6 +3,14 @@ import { getOdoo } from "./odoo.js";
 import { CONFIG } from "./config.js";
 import { STAGES, toCategoryDbValue } from "./mappings.js";
 
+const stageMap = {
+  "New": STAGES.NEW,
+  "In Progress": STAGES.IN_PROGRESS,
+  "Waiting on Customer": STAGES.WAITING_ON_CUSTOMER,
+  "Solved": STAGES.SOLVED
+} as const;
+type StageName = keyof typeof stageMap;
+
 export const tools = [
   {
     name: "helpdesk_list_tickets",
@@ -26,9 +34,7 @@ export const tools = [
       }
       if (input.email) domain.push(["email", "ilike", input.email]);
       if (input.name_search) domain.push(["name", "ilike", input.name_search]);
-
-      const recs = await odoo.listTickets({ limit: input.limit, offset: input.offset, domain });
-      return recs;
+      return odoo.listTickets({ limit: input.limit, offset: input.offset, domain });
     }
   },
   {
@@ -55,13 +61,9 @@ export const tools = [
     }),
     handler: async (input: any) => {
       const odoo = await getOdoo();
-      const ticket_category = input.category_name ? toCategoryDbValue(input.category_name) : undefined;
-      const stage_id = input.stage ? ({
-        "New": STAGES.NEW,
-        "In Progress": STAGES.IN_PROGRESS,
-        "Waiting on Customer": STAGES.WAITING_ON_CUSTOMER,
-        "Solved": STAGES.SOLVED
-      } as const)[input.stage] : undefined;
+      const cat = input.category_name ? toCategoryDbValue(input.category_name) : null;
+      const ticket_category = cat ?? undefined;
+      const stage_id = input.stage ? stageMap[input.stage as StageName] : undefined;
 
       const id = await odoo.createTicket({
         name: input.name,
@@ -89,14 +91,7 @@ export const tools = [
     handler: async (input: any) => {
       const odoo = await getOdoo();
       const updates: Record<string, any> = {};
-      if (input.stage) {
-        updates.stage_id = ({
-          "New": STAGES.NEW,
-          "In Progress": STAGES.IN_PROGRESS,
-          "Waiting on Customer": STAGES.WAITING_ON_CUSTOMER,
-          "Solved": STAGES.SOLVED
-        } as const)[input.stage];
-      }
+      if (input.stage) updates.stage_id = stageMap[input.stage as StageName];
       if (input.category_name) {
         const dbv = toCategoryDbValue(input.category_name);
         if (!dbv) throw new Error("Unknown category_name");
@@ -113,14 +108,10 @@ export const tools = [
   {
     name: "helpdesk_add_message",
     description: "Add a comment to the chatter of a ticket (HTML allowed).",
-    inputSchema: z.object({
-      id: z.number().int(),
-      bodyHtml: z.string()
-    }),
+    inputSchema: z.object({ id: z.number().int(), bodyHtml: z.string() }),
     handler: async ({ id, bodyHtml }: any) => {
       const odoo = await getOdoo();
-      const r = await odoo.addMessage(id, bodyHtml);
-      return r;
+      return odoo.addMessage(id, bodyHtml);
     }
   }
 ];
