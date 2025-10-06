@@ -1,10 +1,10 @@
 FROM node:20-slim
 
 WORKDIR /app
-ENV NODE_ENV=production
+# Don't set NODE_ENV yet — we need dev deps to build
 ENV PORT=3000
 
-# 1) Install deps (dev deps included so we can build). If there's no lockfile, fall back to npm install.
+# 1) Install deps (dev deps included). If no lockfile, fall back to npm install.
 COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
@@ -13,8 +13,9 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
-# 3) Drop dev deps for a slimmer runtime image
+# 3) Drop dev deps and switch to production
 RUN npm prune --omit=dev
+ENV NODE_ENV=production
 
 EXPOSE 3000
 CMD ["node", "dist/server.js"]
