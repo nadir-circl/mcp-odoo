@@ -5,20 +5,18 @@ import { z } from "zod";
 import { CONFIG } from "./config.js";
 import { tools } from "./tools.js";
 
-// ✅ Official SDK server + HTTP transport (no separate SSE package!)
+// ✅ Official SDK server + HTTP transport
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
-// Create one MCP server instance
 const mcp = new McpServer({
   name: "odoo-helpdesk-mcp",
   version: "1.0.0"
 });
 
 // Register our tools with the MCP server
-// Register our tools with the MCP server
 for (const t of tools) {
-  // Ensure we have a ZodObject and extract its shape (what the SDK typing expects)
+  // Ensure we have a ZodObject and extract its shape (what the SDK typing wants)
   const schemaObj = t.inputSchema as z.ZodObject<any>;
   const inputShape = schemaObj.shape;
 
@@ -27,21 +25,26 @@ for (const t of tools) {
     {
       title: t.name,
       description: t.description,
-      // <-- pass the shape instead of the whole Zod schema
+      // SDK typing expects a ZodRawShape (the object "shape"), not a full Zod schema
       inputSchema: inputShape
     },
-    async (args: any) => {
-      // Rebuild a ZodObject from the shape to validate inputs
-      const parsed = z.object(inputShape).parse(args || {});
-      const result = await t.handler(parsed);
+    // SDK expects (args, extra) or (extra). Provide both to satisfy the type.
+    async (args: Record<string, any>, _extra: any) => {
+      // Rebuild a ZodObject from the shape and validate inputs
+      const parsed = z.object(inputShape).parse(args ?? {});
+      // Treat every handler uniformly as (any) => any to avoid union narrowing issues
+      const result = await (t.handler as (input: any) => any)(parsed);
+
+      // Return text content + structured JSON. Cast to "any" to satisfy the content union type.
       return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [
+          { type: "text", text: JSON.stringify(result, null, 2) } as any
+        ] as any,
         structuredContent: result
-      };
+      } as any;
     }
   );
 }
-
 
 const app = express();
 app.use(cors());
@@ -52,7 +55,7 @@ app.get("/", (_req: Request, res: Response) => {
   res.json({ ok: true, service: "mcp-odoo-helpdesk" });
 });
 
-// Simple auth gate (kept, even if AUTH_TOKEN is empty)
+// Simple auth gate (works even if AUTH_TOKEN is empty/disabled)
 function authCheck(req: Request, res: Response, next: NextFunction) {
   if (!CONFIG.AUTH_TOKEN) return next(); // no auth
   const hdr = req.header("authorization") || "";
@@ -62,10 +65,10 @@ function authCheck(req: Request, res: Response, next: NextFunction) {
   res.status(401).json({ error: "unauthorized" });
 }
 
-// CORS preflight for the endpoint
+// CORS preflight for the endpoints
 app.options(["/mcp", "/sse"], cors());
 
-// ✅ Streamable HTTP endpoint (official): POST /mcp
+// ✅ Official Streamable HTTP endpoint: POST /mcp
 app.post("/mcp", authCheck, async (req: Request, res: Response) => {
   try {
     const transport = new StreamableHTTPServerTransport({
@@ -87,7 +90,7 @@ app.post("/mcp", authCheck, async (req: Request, res: Response) => {
   }
 });
 
-// 🔁 Backwards-compat alias: allow clients that point at /sse to work too
+// 🔁 Backwards-compat alias: allow clients pointing at /sse to work too
 app.post("/sse", authCheck, async (req: Request, res: Response) => {
   try {
     const transport = new StreamableHTTPServerTransport({
