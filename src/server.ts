@@ -1,7 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import { z } from "zod";
-import zodToJsonSchema from "zod-to-json-schema";
 
 import { CONFIG } from "./config.js";
 import { tools } from "./tools.js";
@@ -17,16 +16,23 @@ const mcp = new McpServer({
 });
 
 // Register our tools with the MCP server
+// Register our tools with the MCP server
 for (const t of tools) {
+  // Ensure we have a ZodObject and extract its shape (what the SDK typing expects)
+  const schemaObj = t.inputSchema as z.ZodObject<any>;
+  const inputShape = schemaObj.shape;
+
   mcp.registerTool(
     t.name,
     {
       title: t.name,
       description: t.description,
-      inputSchema: t.inputSchema as z.ZodTypeAny   // <-- use Zod, not JSON Schema
+      // <-- pass the shape instead of the whole Zod schema
+      inputSchema: inputShape
     },
     async (args: any) => {
-      const parsed = (t.inputSchema as z.ZodTypeAny).parse(args || {});
+      // Rebuild a ZodObject from the shape to validate inputs
+      const parsed = z.object(inputShape).parse(args || {});
       const result = await t.handler(parsed);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -34,8 +40,8 @@ for (const t of tools) {
       };
     }
   );
-  
 }
+
 
 const app = express();
 app.use(cors());
