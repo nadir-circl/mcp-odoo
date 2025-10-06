@@ -1,21 +1,20 @@
-# Use an official Node image
 FROM node:20-slim
 
 WORKDIR /app
 ENV NODE_ENV=production
+ENV PORT=3000
 
-# install deps first (better layer caching)
+# 1) Install deps (dev deps included so we can build). If there's no lockfile, fall back to npm install.
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-# copy source
+# 2) Copy source and build TS -> dist
 COPY tsconfig.json ./
 COPY src ./src
+RUN npm run build
 
-# build
-RUN npx tsc
+# 3) Drop dev deps for a slimmer runtime image
+RUN npm prune --omit=dev
 
-# runtime
-ENV PORT=3000
 EXPOSE 3000
 CMD ["node", "dist/server.js"]
