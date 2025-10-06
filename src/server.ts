@@ -40,8 +40,14 @@ const server = new SSEServer({
   }
 });
 
-// SSE endpoint
+// CORS preflight for custom headers like Authorization
+app.options("/sse", cors());
+
+// SSE endpoints (both required by MCP clients)
 app.get("/sse", authCheck, async (req: Request, res: Response) => {
+  await server.handle(req, res);
+});
+app.post("/sse", authCheck, async (req: Request, res: Response) => {
   await server.handle(req, res);
 });
 
