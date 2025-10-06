@@ -8,6 +8,7 @@ import { tools } from "./tools.js";
 // ✅ Official SDK server + HTTP transport
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 
 const mcp = new McpServer({
   name: "odoo-helpdesk-mcp",
@@ -50,6 +51,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Keep track of SSE transports so we can route POST /messages calls
+const sseTransports = new Map<string, SSEServerTransport>();
+
 // Health
 app.get("/", (_req: Request, res: Response) => {
   res.json({ ok: true, service: "mcp-odoo-helpdesk" });
@@ -66,7 +70,7 @@ function authCheck(req: Request, res: Response, next: NextFunction) {
 }
 
 // CORS preflight for the endpoints
-app.options(["/mcp", "/sse"], cors());
+app.options(["/mcp", "/sse", "/messages"], cors());
 
 // ✅ Official Streamable HTTP endpoint: POST /mcp
 app.post("/mcp", authCheck, async (req: Request, res: Response) => {
@@ -90,18 +94,61 @@ app.post("/mcp", authCheck, async (req: Request, res: Response) => {
   }
 });
 
-// 🔁 Backwards-compat alias: allow clients pointing at /sse to work too
-app.post("/sse", authCheck, async (req: Request, res: Response) => {
+// 🔁 Backwards compatibility: legacy SSE transport used by ChatGPT Developer mode
+app.get("/sse", authCheck, async (req: Request, res: Response) => {
   try {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true
-    });
-    res.on("close", () => transport.close());
+    const transport = new SSEServerTransport("/messages", res);
+
+    sseTransports.set(transport.sessionId, transport);
+
+    const cleanup = async () => {
+      if (sseTransports.get(transport.sessionId) === transport) {
+        sseTransports.delete(transport.sessionId);
+      }
+      try {
+        await transport.close();
+      } catch (error) {
+        console.warn("[sse] error closing transport", error);
+      }
+    };
+
+    transport.onclose = cleanup;
+    res.on("close", cleanup);
+
     await mcp.connect(transport);
-    await transport.handleRequest(req, res, req.body);
   } catch (err) {
-    console.error("Error handling MCP request:", err);
+    console.error("Error establishing SSE stream:", err);
+    if (!res.headersSent) {
+      res.status(500).send("Error establishing SSE stream");
+    }
+  }
+});
+
+app.post("/messages", authCheck, async (req: Request, res: Response) => {
+  const sessionIdRaw = req.query?.sessionId;
+  const sessionId =
+    typeof sessionIdRaw === "string"
+      ? sessionIdRaw
+      : Array.isArray(sessionIdRaw)
+        ? sessionIdRaw.find((value): value is string => typeof value === "string")
+        : undefined;
+
+  if (!sessionId) {
+    res.status(400).json({ error: "missing sessionId" });
+    return;
+  }
+
+  const transport = sseTransports.get(sessionId);
+
+  if (!transport) {
+    res.status(404).json({ error: "unknown sessionId" });
+    return;
+  }
+
+  try {
+    await transport.handlePostMessage(req, res, req.body);
+  } catch (err) {
+    console.error("Error handling SSE POST message:", err);
     if (!res.headersSent) {
       res.status(500).json({
         jsonrpc: "2.0",
@@ -113,5 +160,7 @@ app.post("/sse", authCheck, async (req: Request, res: Response) => {
 });
 
 app.listen(CONFIG.PORT, () => {
-  console.log(`[mcp] listening on :${CONFIG.PORT} at POST /mcp (and /sse alias)`);
+  console.log(
+    `[mcp] listening on :${CONFIG.PORT} at POST /mcp + legacy GET /sse & POST /messages`
+  );
 });
