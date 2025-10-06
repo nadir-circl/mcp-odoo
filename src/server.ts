@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { CONFIG } from "./config.js";
 import { tools } from "./tools.js";
+import { registerResources } from "./resources.js";
 
 // ✅ Official SDK server + HTTP transport
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -46,6 +47,9 @@ for (const t of tools) {
     }
   );
 }
+
+// Register resources (tickets, etc.) with the MCP server
+registerResources(mcp);
 
 const app = express();
 app.use(cors());
